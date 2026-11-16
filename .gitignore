@@ -1,0 +1,39 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Package/build outputs
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Virtual environment created in project root
+/bin/
+/include/
+/lib/
+/share/
+/pyvenv.cfg
+
+# Spyder
+.spyproject/
+.spyderproject
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets
+.env
+.pypirc
+
+# macOS
+.DS_Store

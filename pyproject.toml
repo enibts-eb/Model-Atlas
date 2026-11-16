@@ -1,0 +1,20 @@
+[build-system]
+requires =["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model_atlas"
+version = "0.1.0"
+description = "A lightweight toolkit for storing all the components of a model in one place and inspecting them with ease."
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies =[
+    "numpy",
+    "pandas"
+]
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
