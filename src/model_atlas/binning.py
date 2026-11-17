@@ -70,7 +70,7 @@ def _bin_equal_exposure(x_sorted, bins):
     x = np.asarray(x_sorted, dtype = float)
     
     if x.ndim != 1:
-        raise ValueError("x_sorted mst be one-dimensional.")
+        raise ValueError("x_sorted must be one-dimensional.")
         
     if x.size == 0:
         raise ValueError("x_sorted must not be empty.")
