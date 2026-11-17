@@ -11,10 +11,10 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies =[
-    "numpy",
-    "pandas"
+    "numpy>=2.4",
+    "pandas>=3.1",
+    "plotly>=7.1"
 ]
-
 
 [tool.setuptools.packages.find]
 where = ["src"]
