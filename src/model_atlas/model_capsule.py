@@ -1,15 +1,70 @@
+"""ModelCapsule is a model agnostic container for a fitted model and its pipeline. 
+Holds a fitted model together with its data splits, pipeline functions(pre-processing,
+feature engineering, post-processing and metadata. Instances are immutable - helper functions
+have been defined below to get a new altered copy of a ModelCapsule."""
+
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
 
+from .utils import _na_coalesce
+
 def _identity(df):
+    """Default pre-processing/feature engeering: return 'df' unchanged."""
     return df
 
 def _identity_post(preds, df_raw):
+    """Default post-processing: return the predictions unchanged."""
     return preds
 
+def _as_name_tuple(value):
+    """Normalise a character vector to a tuple of names.
+    A single string becomes a 1-tuple. None becomes '()'. Lists/arrays/series become tuples.
+    Anything else is returned unchanged so validation can report it.
+    """
+    if value is None:
+        return ()
+    if isinstance(value,str):
+        return (value,)
+    if isinstance(value, (list, tuple, np.ndarray, pd.Series, pd.Index)):
+        return tuple(value)
+    return value
+
+def _call_pipeline_fun(fun, fun_name, *args):
+    """Call a pipeline function with a helpful error message.
+    Catches 'NameError' and re-raises it with advice on how to fix it. Any other error is raised unchanged.
+    
+    Parameters
+    ----------
+    fun: callable
+        The pipeline function to call.
+    fun_name: str
+        Name of the pipeline functions used in the error message.
+    *args
+        Arguments passed on to 'fun'.
+        
+    Returns
+    -------
+    Any
+        Whatever 'fun' returns.
+    
+    Raises
+    ------
+    NameError
+        If 'fun' refers to a name that is not defined.
+    """
+    try:
+        return fun(*args)
+    except NameError as error:
+        raise NameError(f"{fun_name} failed: {error}\n"
+                        f"A package used inside {fun_name} is not imported.") from error
+    
+def _is_h2o_model(model):
+    """True if 'model' is an H2O model"""
+    return type(model).__module__.split(".")[0] == "h2o"
+    
 @dataclass(frozen = True)
 class ModelCapsule:
     """Model-agnostic container for a fitted model and its pipeline."""
