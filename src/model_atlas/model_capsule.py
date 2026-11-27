@@ -139,10 +139,79 @@ def _model_predict(model, newdata):
         raw = raw[:, 0]
         
     return raw.astype(float).ravel()
+
+def _format_nrow(df):
+    """Row count with thousands separators or <not set> for None."""
+    return "<not set>" if df is None else f"{len(df):,}"
+
+def _format_number(value):
+    """Format a number"""
+    if value is None:
+        return "NA"
+    return f"{value:.15g}"
     
 @dataclass(frozen = True)
 class ModelCapsule:
-    """Model-agnostic container for a fitted model and its pipeline."""
+    """Model-agnostic container for a fitted model and its pipeline.
+    
+    Only 'model' is required, every other attribute has a default. All attributes are validated when the capsule
+    is created. 
+    
+    Parameters
+    ----------
+    model: Any
+        A fitted model object with a 'predict' method.
+    train, test, validation: pandas.DataFrame or None, default None
+        Datasets.
+    feat_eng_fun: callable, default identity
+        Feature engineering pipeline.
+    pre_process_fun: callable, default identity
+        Pre-processing pipeline
+    post_process_fun: callable, default identity
+        Post-processing pipeline
+    raw_variables: str or sequenec of str, default ()
+        Original input feature names. A single string is accepted. An empty tuple means 'not set'.
+    x_variables: str or sequence of str, default ()
+        Engineered feature names. A single string is accepted. An empty tuple means 'not set'.
+    target_name: str or None, default None
+        Target variable name.
+    preds_name: str or None, default None
+        Prediction column name. 
+    exposure_name: str or None, default 'exposure'
+        Exposure column name. It does not have to exist in 'train'. Unit weights are used when it is absent. 
+    exposure_val: float, default 1
+        Reference exposure value.
+    expo_0_rep: float, default 0.1
+        Replacement for zero-exposure rows.
+    offset_name: str or None, default None
+        Offset variable name. 
+    offset_value: float or None, default None
+        Offset value.
+    model_name: str or None, default None
+        Label for the model.
+    model_notes: str or None, default None
+        Notes about the model - for example deployment notes. 
+        
+    Raises
+    ------
+    ValueError
+        If any attribute is invalid. All problems are listed together one per line. See '_validate' for the checks.
+        
+    Example
+    -------
+    from sklearn.linear_model import LinearRegression
+    df = pd.DataFrame({"x": [1,2,3,4], "y":[2.0, 4.1, 5.9, 8.2]})
+    mc = ModelCapsule(
+        model = LinearRegression().fit(df[["x"]], df[["y"]]),
+        train = df,
+        target_name = "y",
+        raw_variables = "x",
+        model_name = "Model_LR"
+        ...
+        )
+    mc.raw_variables
+    ('x',)
+    """
     
     model: Any
     
@@ -161,7 +230,7 @@ class ModelCapsule:
     preds_name: str | None = None
     
     exposure_name: str | None = "exposure"
-    expo_val: float = 1
+    exposure_val: float = 1
     expo_0_rep: float = 0.1
     
     offset_name: str | None = None
@@ -171,10 +240,34 @@ class ModelCapsule:
     model_notes: str | None = None
     
     def __post_init__(self):
+        for name in ("raw_variables", "x_variables"):
+            object.__setattr__(self, name, _as_name_tuple(getattr(self, name)))
         self._validate()
     
     # Components check/validation    
     def _validate(self):
+        """Check every attribute and raise one error listing all problems. 
+        
+        Returns
+        -------
+        None
+        
+        Raises
+        ------
+        ValueError
+            If any of these checks fail:
+            
+            * 'model' is None.
+            * 'train', 'test', 'validation' is not a DataFrame or None.
+            * A pipeline function is not callable.
+            * A name attribute is not a single string or None or is "".
+            * 'raw_variables' or "x_variables" is not a character vector.
+            * 'raw_variables' contains empty strings or duplicates.
+            * 'expo_val' or 'expo_0_rep' is not a poistive finite number.
+            * 'offset_value' is not a finite number or None. 
+            * 'target_name' and 'preds_name' are the same. 
+            * 'target_name', 'raw_variables' or 'offset_name' are not columns of 'train'
+        """
         errors = []
         
         # Model
@@ -213,47 +306,37 @@ class ModelCapsule:
                     errors.append(f"{name} cannot be an empty string. Use None to leave it unset.")
          
         # Character vectors (x variables)
+        valid_vectors = {}
         for name in ("raw_variables", "x_variables"):
             value = getattr(self, name)
+            is_vector = isinstance(value, tuple) and all(item is None or isinstance(item, str) for item in value)
             
-            if isinstance(value, str):
-                values = (value,)
-            else:
-                try:
-                    values = tuple(value)
-                except TypeError:
-                    errors.append(f"{name} must be a character vector.")
-                    continue
-                
-            if not all(
-                    item is None or isinstance(item, str)
-                    for item in values
-            ):
-                    errors.append(f"{name} must be a character vector.")
-        
-        # Further checks on x variables
-        x = [value for value in self.raw_variables if value is not None]
+            if not is_vector:
+                errors.append(f"{name} must be a string or a sequence of strings.")
+            valid_vectors[name] = is_vector
+            
+        x = []
+        if valid_vectors["raw_variables"]:
+            x = [value for value in self.raw_variables if value is not None]
         
         if any(value =="" for value in x):
-            errors.append("raw_variables must not contain empty strings.")
-            
+            errors.append("raw variables must not contain empty strings.")
+
+        seen = set()
         duplicates = []
         for value in x:
-            if x.count(value) > 1 and value not in duplicates:
+            if value in seen and value not in duplicates:
                 duplicates.append(value)
+            seen.add(value)
         
         if duplicates:
             errors.append("raw_variables contains duplicate name(s): " + ", ".join(duplicates) + ".")
         
         # Positive finite numerics
-        for name in ("expo_val", "expo_0_rep"):
+        for name in ("exposure_val", "expo_0_rep"):
             value = getattr(self, name)
             
-            if (isinstance(value, (bool, np.bool_))
-                or not isinstance(value, (int, float, np.number))
-                or not np.isfinite(value)
-                or value <= 0
-            ):
+            if (isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.number)) or not np.isfinite(value) or value <= 0):
                 errors.append(f"{name} must be a single positive finite number." f"(got {value}).")
         
         # Offset value    
