@@ -64,6 +64,81 @@ def _call_pipeline_fun(fun, fun_name, *args):
 def _is_h2o_model(model):
     """True if 'model' is an H2O model"""
     return type(model).__module__.split(".")[0] == "h2o"
+
+def _model_predict(model, newdata):
+    """Predict using any supported model and return a 1D float array. 
+    *H2O models: predictions on h2o frames. For binary classification the positive-class probability is returned.
+    *Binary classifiers with 'predict_proba': the positive-class probability.
+    *Everything else: 'predict' statsmodels GLMs already predict on the response scale. 
+    
+    If 'predict()' returns a 2D result, the first column is used.
+    
+    Parameters
+    ----------
+    model: Any
+        A fitted model. 
+    newdata: pandas.DataFrame
+        Data o predict on - already pre-processed and feature engineered.
+        
+    Returns
+    -------
+    numpy.ndarray
+        One float prediction per row.
+        
+    Raises
+    ------
+    ValueError
+        If the model is a multiclass classifier which has no single numeric prediction per row.
+    ModuleNotFoundError
+        If the model is an H2O model and the 'h2o' package is not installed.
+    RuntimeError
+        If the model's own prediction call fails - the original error is included in the message. 
+    """
+    nd = newdata if isinstance(newdata, pd.DataFrame) else pd.DataFrame(newdata)
+    model_class = type(model).__name__
+    
+    multiclass_message = ("Multiclass models are not supported. Model diagnostics need a single numeric prediction per row."
+                          "A multiclass model returns one probability per class.")
+    
+    if _is_h2o_model(model):
+        import h2o
+        
+        hf = h2o.H2OFRAME(nd) #H2O required its own frame type and returns an H2O frame.
+        try: 
+            raw = model.predict(hf).as_data_frame()
+        finally:
+            h2o.remove(hf)
+            
+        if raw.shape[1] > 3:
+            raise ValueError(multiclass_message)
+        return raw.iloc[:, -1].to_numpy(dtype=float)
+    
+    feature_names = getattr(model, "feature_name_in_", None)
+    if feature_names is not None and all(name in nd.columns for name in feature_names):
+        nd = nd[list(feature_names)]
+        
+    classes = getattr(model, "classes_", None)
+    is_classifier = hasattr(model, "predict_proba") and classes is not None
+
+    if is_classifier and len(classes) > 2:
+        raise ValueError(multiclass_message)
+        
+    try:
+        if is_classifier:
+            raw = model.predict_proba(nd)[:, -1]
+        else:
+            raw = model.predict(nd)
+    except Exception as error:
+        raise RuntimeError(f"predict() failed for model class '{model_class}'.\n{error}") from error
+        
+    if isinstance(raw, pd.DataFrame):
+        raw = raw.iloc[:, 0]
+        
+    raw = np.asarray(raw)
+    if raw.ndim == 2:
+        raw = raw[:, 0]
+        
+    return raw.astype(float).ravel()
     
 @dataclass(frozen = True)
 class ModelCapsule:
